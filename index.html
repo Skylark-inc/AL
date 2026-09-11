@@ -1,160 +1,200 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Auto Launch</title>
 <script>
 (() => {
     "use strict";
-    const EDITIONS_URL = "https://skylark-inc.github.io/editions.json";
-    const FIND_EDITION_URL = "https://skylark-inc.github.io/FindEdition";
-    const MAIN_PAGE_URL = "https://skylark-inc.github.io";
-    const EOL_URL = "https://skylark-inc.github.io/NonServer/";
+
+    const EDITIONS_URL =
+        "https://skylark-inc.github.io/editions.json";
+
+    const MAIN_PAGE_URL =
+        "https://skylark-inc.github.io";
+
     function redirect(url) {
         window.location.replace(url);
     }
+
     function compareVersions(a, b) {
-        const pa = String(a).split(".").map(Number);
-        const pb = String(b).split(".").map(Number);
-        const length = Math.max(pa.length, pb.length);
+        const A = String(a).split(".").map(Number);
+        const B = String(b).split(".").map(Number);
+
+        const length = Math.max(A.length, B.length);
+
         for (let i = 0; i < length; i++) {
-            const va = pa[i] || 0;
-            const vb = pb[i] || 0;
-            if (va > vb) return 1;
-            if (va < vb) return -1;
+            const x = A[i] ?? 0;
+            const y = B[i] ?? 0;
+
+            if (x > y) return 1;
+            if (x < y) return -1;
         }
+
         return 0;
     }
+
     function isAppleMobileDevice() {
         const ua = navigator.userAgent;
-        // Normal iPhone / iPad / iPod detection
+
+        // iPhone / iPad / iPod
         if (/iPhone|iPad|iPod/i.test(ua)) {
             return true;
         }
-        // iPadOS may identify itself as Macintosh
+
+        // iPad using desktop-class identification
         if (
             navigator.platform === "MacIntel" &&
             navigator.maxTouchPoints > 1
         ) {
             return true;
         }
+
         return false;
     }
-    function getAppleOSVersion() {
+
+    function getVersion() {
         const ua = navigator.userAgent;
-        // iPhone / iPod
-        let match = ua.match(/iPhone OS (\d+[_\d]*)/i);
-        if (match) {
-            return match[1].replace(/_/g, ".");
-        }
-        // iPad / iPadOS
-        match = ua.match(/CPU(?: iPhone)? OS (\d+[_\d]*)/i);
-        if (match) {
-            return match[1].replace(/_/g, ".");
-        }
-        // Other Apple mobile user-agent format
-        match = ua.match(/OS (\d+[_\d]*) like Mac OS X/i);
-        if (match) {
-            return match[1].replace(/_/g, ".");
-        }
-        return null;
+
+        /*
+         * IMPORTANT:
+         *
+         * Skylark Auto Launch uses the Safari Version/
+         * identifier.
+         *
+         * Example:
+         *
+         * Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)
+         * AppleWebKit/605.1.15 (KHTML, like Gecko)
+         * Version/18.7.5 Mobile/15E148 Safari/604.1
+         *
+         * Result:
+         *
+         * 18.7.5
+         *
+         * Do NOT use:
+         *
+         * CPU iPhone OS 18_7
+         */
+
+        const match =
+            ua.match(/Version\/(\d+(?:\.\d+)*)/i);
+
+        return match ? match[1] : null;
     }
-    function findMatchingEdition(editions, osVersion) {
+
+    function findEdition(editions, version) {
         return editions.find(edition => {
-            if (!edition.min || !edition.max) {
+            if (
+                edition.min == null ||
+                edition.max == null
+            ) {
                 return false;
             }
+
             return (
-                compareVersions(osVersion, edition.min) >= 0 &&
-                compareVersions(osVersion, edition.max) <= 0
+                compareVersions(
+                    version,
+                    edition.min
+                ) >= 0 &&
+                compareVersions(
+                    version,
+                    edition.max
+                ) <= 0
             );
         });
     }
+
     async function autoLaunch() {
+
         /*
-         * Non-Apple mobile devices and normal desktop computers,
-         * including Macs, do not use Skylark edition routing.
+         * AL is exclusively for Apple mobile devices
+         * with a dedicated Skylark release page.
          *
-         * Send them to the main Skylark website.
+         * Mac, Android, Windows, Linux, etc. → Home
          */
         if (!isAppleMobileDevice()) {
             redirect(MAIN_PAGE_URL);
             return;
         }
+
         /*
-         * Apple mobile device detected.
-         *
-         * Now determine the installed iOS/iPadOS version.
+         * Read Version/x.x.x from the user agent.
          */
-        const osVersion = getAppleOSVersion();
-        /*
-         * If the device is clearly an iPhone/iPad/iPod but the
-         * browser does not expose enough version information,
-         * send the user to Find Edition rather than guessing.
-         */
-        if (!osVersion) {
-            redirect(FIND_EDITION_URL);
+        const version = getVersion();
+
+        if (!version) {
+            redirect(MAIN_PAGE_URL);
             return;
         }
+
         try {
-            const response = await fetch(EDITIONS_URL, {
-                cache: "no-store"
-            });
-            if (!response.ok) {
-                throw new Error("Unable to load editions.json");
-            }
-            const editions = await response.json();
-            if (!Array.isArray(editions)) {
-                throw new Error("Invalid editions.json format");
-            }
-            const edition = findMatchingEdition(
-                editions,
-                osVersion
+            const response = await fetch(
+                EDITIONS_URL,
+                {
+                    cache: "no-store"
+                }
             );
+
+            if (!response.ok) {
+                throw new Error(
+                    "Could not load editions.json"
+                );
+            }
+
+            const editions = await response.json();
+
+            if (!Array.isArray(editions)) {
+                throw new Error(
+                    "Invalid editions.json"
+                );
+            }
+
+            const edition =
+                findEdition(editions, version);
+
             /*
-             * Apple device, but its OS does not match any
-             * currently listed Skylark edition.
+             * No matching edition → Home
              */
             if (!edition) {
-                redirect(FIND_EDITION_URL);
+                redirect(MAIN_PAGE_URL);
                 return;
             }
+
             /*
-             * EOL rules always take priority.
+             * EOL editions do not use AL.
              */
             if (edition.eol === true) {
-                redirect(EOL_URL);
+                redirect(MAIN_PAGE_URL);
                 return;
             }
+
             /*
-             * releasePage comes ONLY from editions.json.
+             * AL ONLY launches editions with
+             * an actual releasePage.
+             *
+             * No releasePage → Home
              */
             if (
                 typeof edition.releasePage !== "string" ||
                 edition.releasePage.trim() === ""
             ) {
-                redirect(FIND_EDITION_URL);
+                redirect(MAIN_PAGE_URL);
                 return;
             }
+
             /*
-             * Matching supported edition found.
-             *
              * 🚀 AUTO LAUNCH
              */
-            redirect(edition.releasePage.trim());
+            redirect(
+                edition.releasePage.trim()
+            );
+
         } catch (error) {
             console.error(
                 "Skylark Auto Launch failed:",
                 error
             );
-            redirect(FIND_EDITION_URL);
+
+            redirect(MAIN_PAGE_URL);
         }
     }
+
     autoLaunch();
 })();
 </script>
-</head>
-<body>
-</body>
-</html>
